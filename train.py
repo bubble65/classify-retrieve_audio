@@ -1,8 +1,8 @@
 # By BUBBLE
 # 2024-12-17
-'''
+"""
 ref : BEATs: Audio Pre-Training with Acoustic Tokenizers
-'''
+"""
 
 import os
 import torch
@@ -18,29 +18,38 @@ from transformers import HfArgumentParser
 from BEATs import BEATs, BEATsConfig
 
 # 配置日志
-logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
+logging.basicConfig(
+    format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO
+)
 logger = logging.getLogger(__name__)
+
 
 @dataclass
 class TrainArguments:
     """
     Arguments related to training.
     """
-    data_dir: str = field(default='../ESC-50-master/audio')
-    csv_file: str = field(default='../ESC-50-master/meta/esc50.csv')
+
+    data_dir: str = field(default="../ESC-50-master/audio")
+    csv_file: str = field(default="../ESC-50-master/meta/esc50.csv")
     batch_size: int = field(default=16)
     learning_rate: float = field(default=1e-4)
-    num_epochs: int = field(default=20) # 差不多10轮就可以
-    pretrained_path: str = field(default="../ckpt/BEATs_iter3_plus_AS20K_finetuned_on_AS2M_cpt2.pt")
+    num_epochs: int = field(default=20)  # 差不多10轮就可以
+    pretrained_path: str = field(
+        default="../ckpt/BEATs_iter3_plus_AS20K_finetuned_on_AS2M_cpt2.pt"
+    )
     output_model_path: str = field(default="../ckpt/finetuned_model.pt")
     train_mode: bool = field(default=False)
+
 
 @dataclass
 class ModelArguments:
     """
     Arguments related to model initialization and configuration.
     """
-    checkpoint_path: str = field(default='../ckpt/finetuned_model_1.pt')
+
+    checkpoint_path: str = field(default="../ckpt/finetuned_model_1.pt")
+
 
 class ESC50Dataset(Dataset):
     def __init__(self, data_dir, csv_file, mode, transform=None):
@@ -52,7 +61,7 @@ class ESC50Dataset(Dataset):
         """
         self.data_dir = data_dir
         self.transform = transform
-        
+
         # 读取标签文件
         self.data = []
 
@@ -61,25 +70,30 @@ class ESC50Dataset(Dataset):
             for line in lines:
                 filename, fold, target = line.strip().split(",")[:3]
                 # 5 折作为测试集
-                if (fold == "5" and mode == "test") or (fold != "5" and mode == "train"):
+                if (fold == "5" and mode == "test") or (
+                    fold != "5" and mode == "train"
+                ):
                     self.data.append((filename, int(target)))
-        
+
     def __getitem__(self, idx):
         filename, label = self.data[idx]
         waveform, sr = torchaudio.load(os.path.join(self.data_dir, filename))
         # 转为 16kHz
-        resampler = T.Resample(sr, 16000) #[1 , 8w] 5s的音频
+        resampler = T.Resample(sr, 16000)  # [1 , 8w] 5s的音频
         waveform = resampler(waveform)
         return waveform.squeeze(0), label
-    
+
     def __len__(self):
         return len(self.data)
+
 
 def train(model, train_loader, optimizer, criterion, device, num_epochs=10):
     model.train()
     for epoch in range(num_epochs):
         total_loss = 0
-        progress_bar = tqdm(train_loader, desc=f'Epoch {epoch+1}/{num_epochs}', unit='batch')
+        progress_bar = tqdm(
+            train_loader, desc=f"Epoch {epoch+1}/{num_epochs}", unit="batch"
+        )
         for waveforms, labels in progress_bar:
             waveforms = waveforms.to(device)
             labels = labels.long().to(device)
@@ -94,13 +108,16 @@ def train(model, train_loader, optimizer, criterion, device, num_epochs=10):
             total_loss += loss.item()
             progress_bar.set_postfix(loss=total_loss / (progress_bar.n + 1))
 
-        logger.info(f"Epoch {epoch+1}/{num_epochs}, Average Loss: {total_loss / len(train_loader):.4f}")
+        logger.info(
+            f"Epoch {epoch+1}/{num_epochs}, Average Loss: {total_loss / len(train_loader):.4f}"
+        )
+
 
 def evaluate(model, test_loader, device):
     model.eval()
     correct, total = 0, 0
     with torch.no_grad():
-        progress_bar = tqdm(test_loader, desc="Evaluating", unit='batch')
+        progress_bar = tqdm(test_loader, desc="Evaluating", unit="batch")
         for inputs, labels in progress_bar:
             inputs, labels = inputs.to(device), labels.to(device)
             logits, _ = model(inputs)
@@ -112,6 +129,7 @@ def evaluate(model, test_loader, device):
         logger.info(f"Accuracy: {accuracy * 100:.2f}%")
         return accuracy
 
+
 def main():
     # 参数解析
     parser = HfArgumentParser((TrainArguments, ModelArguments))
@@ -119,26 +137,37 @@ def main():
 
     # 加载数据
     train_dataset = ESC50Dataset(train_args.data_dir, train_args.csv_file, "train")
-    train_loader = DataLoader(train_dataset, batch_size=train_args.batch_size, shuffle=True)
+    train_loader = DataLoader(
+        train_dataset, batch_size=train_args.batch_size, shuffle=True
+    )
 
     test_dataset = ESC50Dataset(train_args.data_dir, train_args.csv_file, "test")
-    test_loader = DataLoader(test_dataset, batch_size=train_args.batch_size, shuffle=False)
+    test_loader = DataLoader(
+        test_dataset, batch_size=train_args.batch_size, shuffle=False
+    )
 
     # 设备配置 and 实例化模型
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     checkpoint = torch.load(train_args.pretrained_path)
-    cfg = BEATsConfig(checkpoint['cfg'])
+    cfg = BEATsConfig(checkpoint["cfg"])
     BEATs_model = BEATs(cfg)
-    
+
     # 训练或评估
     if train_args.train_mode:
         # 加载模型参数
-        BEATs_model.load_state_dict(checkpoint['model'])
+        BEATs_model.load_state_dict(checkpoint["model"])
         BEATs_model.predictor = nn.Linear(cfg.encoder_embed_dim, 50)
         BEATs_model = BEATs_model.to(device)
         optimizer = optim.Adam(BEATs_model.parameters(), lr=train_args.learning_rate)
         criterion = nn.CrossEntropyLoss()
-        train(BEATs_model, train_loader, optimizer, criterion, device, num_epochs=train_args.num_epochs)
+        train(
+            BEATs_model,
+            train_loader,
+            optimizer,
+            criterion,
+            device,
+            num_epochs=train_args.num_epochs,
+        )
         torch.save(BEATs_model.state_dict(), train_args.output_model_path)
     else:
         BEATs_model.predictor = nn.Linear(cfg.encoder_embed_dim, 50)
@@ -146,6 +175,6 @@ def main():
         BEATs_model = BEATs_model.to(device)
         evaluate(BEATs_model, test_loader, device)
 
+
 if __name__ == "__main__":
     main()
-
